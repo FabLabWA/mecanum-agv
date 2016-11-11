@@ -9,7 +9,31 @@
 #define M3_P 9
 #define M3_D 8
 
-#define NOQUADRATURE
+
+#define E0A_b 0x02
+#define E0B_b 0x01
+#define E0_b (E0A_b | E0B_b)
+
+#define E1A_b 0x08
+#define E1B_b 0x04
+#define E1_b (E1A_b | E1B_b)
+
+#define E01_b (E0_b | E1_b)
+
+
+#define E2A_b 0x08
+#define E2B_b 0x04
+#define E2_b (E2A_b | E2B_b)
+
+#define E3A_b 0x20
+#define E3B_b 0x10
+#define E3_b (E3A_b | E3B_b)
+
+#define E23_b (E2_b | E3_b)
+
+
+
+#define QUADRATURE
 
 
 //H-bridge pins
@@ -23,6 +47,13 @@ int motorPWM[4]     = { 0, 0, 0, 0 };
 
 bool motorPIDenable = false;
 
+
+//PID state varibles
+double kp=1, ki=0, kd=0;
+double motorSetpoint[4] = {0,0,0,0};    //not used, left as zero
+double motorPosError[4] = {0,0,0,0};    //PID error input
+double motorOutput[4] = {0,0,0,0};      //PID output
+
 //PID controllers
 PID motorPID[4] {
   {&motorPosError[0], &motorOutput[0], &motorSetpoint[0], kp,ki,kd, DIRECT},
@@ -30,12 +61,6 @@ PID motorPID[4] {
   {&motorPosError[2], &motorOutput[2], &motorSetpoint[2], kp,ki,kd, DIRECT},
   {&motorPosError[3], &motorOutput[3], &motorSetpoint[3], kp,ki,kd, DIRECT}
 };
-
-//PID state varibles
-double kp=1, ki=0, kd=0;
-double motorSetpoint[4] = {0,0,0,0};    //not used, left as zero
-double motorPosError[4] = {0,0,0,0};    //PID error input
-double motorOutput[4] = {0,0,0,0};      //PID output
 
 //pulse generator variables
 const double maxSpeed = 2000.0;    //hz (encoder edges per second)
@@ -130,7 +155,7 @@ void loop() {
 
   //pulse generator
   for(int i=0; i<4; i++){
-    theTime = micros();
+    unsigned long theTime = micros();
     double frequency = (motorSpeed[i] > 0) ? motorSpeed[i] : -motorSpeed[i];  //set it positive
     if(!motorPIDenable) frequency = 0;  //don't deliberately build error
     frequency = (frequency > maxSpeed) ? maxSpeed : frequency;  //set a max speed
@@ -142,11 +167,7 @@ void loop() {
       if(theTime - lastPulse[i] > period){
         lastPulse[i] += period;
         //(motorSpeed[i] > 0) ? targetPosition[i]++ : targetPosition[i]--;
-#ifdef QUADRATURE
         (motorSpeed[i] > 0) ? targetPosition[i] += 2 : targetPosition[i] -= 2;  //don't limp with uneven edges
-#else
-        targetPosition[i] += 2;
-#endif        
       }
     }
   }
@@ -155,7 +176,7 @@ void loop() {
 
   if(motorPIDenable){
     for(int i=0; i<4; i++){
-      motorPosError[i] = targetPosition[i] - encoderPosition[i];  //these will overflow regularly, don't use the setpoint
+      motorPosError[i] = targetPosition[i] - encoderPosition[i];  //these will overflow regularly, don't use the setpoint      
       motorPID[i].Compute();
       setMotor(motorOutput[i], i);
     }
@@ -278,10 +299,13 @@ ISR(PCINT0_vect) {
 ISR(PCINT1_vect) {
   //low latency tasks
   uint8_t newPCstate = PINC;  //fetch the Port C input register as soon as possible,
-  
+
   uint8_t freshEdges = (newPCstate ^ oldPCstate) & 0x0F; //which bits changed?
   for(int i=0; i<4; i++) {
-    if(freshEdges & (i<<1)) encoderPosition[i]++;
+    if(freshEdges & (i<<1)){
+      (motorDir[i]==0) ? encoderPosition[i]++ : encoderPosition[i]++;
+      }
+    } 
   }
   
 
