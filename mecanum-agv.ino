@@ -46,6 +46,8 @@ int motorPWM[4]     = { 0, 0, 0, 0 };
 
 
 bool motorPIDenable = false;
+unsigned long lastHeartBeat = 0;
+unsigned long maxHeartBeat = 5000; //5 seconds ( against millis() )
 
 
 //PID state varibles
@@ -152,8 +154,19 @@ void loop() {
     }
   }
 
+  //heartbeat
+  if(millis() - lastHeartBeat > maxHeartBeat){
+    lastHeartBeat = millis();
+    //all stop
+    motorPIDenable = false;
+    for(int i=0; i<4; i++){
+      setMotor(0, i);
+      motorPID[i].SetMode(MANUAL);
+    }
+  }
 
-  //pulse generator
+
+  //motion pulse generator
   for(int i=0; i<4; i++){
     unsigned long theTime = micros();
     double frequency = (motorSpeed[i] > 0) ? motorSpeed[i] : -motorSpeed[i];  //set it positive
@@ -174,6 +187,7 @@ void loop() {
 
 
 
+  //run the PID loops and drive the motors
   if(motorPIDenable){
     for(int i=0; i<4; i++){
       motorPosError[i] = targetPosition[i] - encoderPosition[i];  //these will overflow regularly, don't use the setpoint      
@@ -189,6 +203,10 @@ void loop() {
 
     
 }
+
+
+
+
 
 void setMotor(int speed, int motor){
   if(speed==0){
@@ -297,18 +315,20 @@ ISR(PCINT0_vect) {
 }
 
 ISR(PCINT1_vect) {
+  static uint8_t oldPCstate = 0;  //store the state interrupt-by-interrupt.
+
   //low latency tasks
   uint8_t newPCstate = PINC;  //fetch the Port C input register as soon as possible,
 
   uint8_t freshEdges = (newPCstate ^ oldPCstate) & 0x0F; //which bits changed?
   for(int i=0; i<4; i++) {
     if(freshEdges & (i<<1)){
-      (motorDir[i]==0) ? encoderPosition[i]++ : encoderPosition[i]++;
+      (motorDir[i]==0) ? encoderPosition[i]++ : encoderPosition[i]++; //dirty hack, assume the wheels are rotating in the same direction as drive power
       }
     } 
   }
-  
 
+  oldPCstate = newPCstate;
 }
 
 #endif
