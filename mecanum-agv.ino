@@ -1,7 +1,8 @@
 #include <PID_v1.h>
 
-#define M0_P 3
-#define M0_D 2
+//motor pins
+#define M0_P 3  //pwm, active high
+#define M0_D 2  //direction
 #define M1_P 5
 #define M1_D 4
 #define M2_P 6
@@ -9,7 +10,7 @@
 #define M3_P 9
 #define M3_D 8
 
-
+//encoder pins
 #define E0A_b 0x02
 #define E0B_b 0x01
 #define E0_b (E0A_b | E0B_b)
@@ -74,7 +75,12 @@ long targetPosition[4] = {0,0,0,0};   //target for the PID
 volatile long encoderPosition[4] = {0,0,0,0}; //current wheel angle (updated in interrupt)
 
 
-
+//channel mixing
+bool channelMixingEnable = false;
+double velocityVector[3] = {0,0,0}; //x, y, omega (north, east, rotate)
+double mixArray =  {{1, 1, -1, -1}, //north
+                    {1, -1, -1, 1}, //east
+                    {1, -1, 1, -1}} //clockwise  (NED coordinates)
 
 
 
@@ -101,7 +107,8 @@ void setup() {
 
 
 void loop() {
-  // put your main code here, to run repeatedly:
+
+  //state machine needs to run non-blocking
   while (Serial.available() > 0)
   {
     int command = Serial.read();
@@ -159,6 +166,11 @@ void loop() {
     lastHeartBeat = millis();
     //all stop
     motorPIDenable = false;
+
+    for(int i=0; i<3; i++){
+      velocityVector[i] = 0;
+    }
+
     for(int i=0; i<4; i++){
       setMotor(0, i);
       motorPID[i].SetMode(MANUAL);
@@ -177,15 +189,23 @@ void loop() {
     if(frequency < minSpeed){ //division for period won't deal well with small speeds.
       lastPulse[i] = theTime; //keep it ticking.
     }else{
-      if(theTime - lastPulse[i] > period){
+      while(theTime - lastPulse[i] > period){  //if should be while, with some logic to catch run-away
         lastPulse[i] += period;
         //(motorSpeed[i] > 0) ? targetPosition[i]++ : targetPosition[i]--;
-        (motorSpeed[i] > 0) ? targetPosition[i] += 2 : targetPosition[i] -= 2;  //don't limp with uneven edges
+        (motorSpeed[i] > 0) ? targetPosition[i] += 2 : targetPosition[i] -= 2;  //don't limp with uneven encoder edges
       }
     }
   }
 
-
+  //channel mixing
+  if(channelMixingEnable && motorPIDenable){
+    for(int i=0; i<4; i++){
+      motorSpeed[i] = 0;
+      for(int j=0; j<3; j++){
+        motorSpeed[i] += velocityVector[j] * mixArray[j][i];
+      }
+    }
+  }
 
   //run the PID loops and drive the motors
   if(motorPIDenable){
@@ -195,10 +215,12 @@ void loop() {
       setMotor(motorOutput[i], i);
     }
   }else{
-    for(int i=0; i<4; i++){
+    for(int i=0; i<4; i++){   //the pulse-gen logic could be re-structured to include this.
       targetPosition[i] = encoderPosition[i];  //don't jump on next start
     }
   }
+
+
 
 
     
